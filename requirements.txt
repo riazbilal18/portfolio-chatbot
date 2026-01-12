@@ -1,0 +1,20 @@
+# FastAPI backend
+fastapi
+uvicorn
+python-dotenv
+
+# LangChain core
+langchain
+langchain-core
+langchain-community
+langchain-text-splitters
+
+# Vector database
+chromadb
+
+# Free local embeddings
+sentence-transformers
+
+# Web scraping
+beautifulsoup4
+lxml
