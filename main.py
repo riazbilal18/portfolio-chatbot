@@ -52,6 +52,8 @@ app.add_middleware(
         "http://localhost:3000",
         "http://localhost:5173",
         "https://bilalriaz.com",
+        "https://www.bilalriaz.com",
+        "https://*.railway.app",
         "https://*.vercel.app"
     ],
     allow_credentials=True,
