@@ -1,6 +1,6 @@
 # Author: Bilal Riaz
-# Description: Railway-optimized FastAPI chatbot with improved deployment handling
-# Fast Cloud API using Groq - 2-5 second responses
+# Description: Lightweight FastAPI chatbot optimized for Railway (< 1GB image)
+# Uses Cohere embeddings API instead of local sentence-transformers
 
 import os
 from typing import Generator
@@ -14,7 +14,7 @@ from dotenv import load_dotenv
 
 from langchain_community.document_loaders import WebBaseLoader, TextLoader
 from langchain_community.vectorstores import Chroma
-from langchain_community.embeddings import HuggingFaceEmbeddings
+from langchain_cohere import CohereEmbeddings  # Lightweight API-based embeddings
 from langchain_community.chat_message_histories import ChatMessageHistory
 
 from langchain_groq import ChatGroq
@@ -35,6 +35,7 @@ VECTOR_DB_DIR = os.getenv("VECTOR_DB_DIR", "./vectorstore")
 RESUME_MD_PATH = os.getenv("RESUME_MD_PATH", "./resume.md")
 FAQ_PATH = os.getenv("FAQ_PATH", "./faq.md")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
+COHERE_API_KEY = os.getenv("COHERE_API_KEY") 
 
 # Railway deployment detection
 IS_RAILWAY = os.getenv("RAILWAY_ENVIRONMENT") is not None
@@ -43,16 +44,22 @@ PORT = int(os.getenv("PORT", 8000))
 print(f"🚂 Running on Railway: {IS_RAILWAY}")
 print(f"🔌 Port: {PORT}")
 
+# Validate required API keys
+if not GROQ_API_KEY:
+    raise ValueError("❌ GROQ_API_KEY is required!")
+if not COHERE_API_KEY:
+    raise ValueError("❌ COHERE_API_KEY is required! Get free key at: https://dashboard.cohere.com/")
+
 # ─────────────────────────────────────────────
 # FastAPI App
 # ─────────────────────────────────────────────
 app = FastAPI(
-    title="Portfolio Chatbot API (Railway-Optimized)",
-    description="Fast, context-aware chatbot with FAQ support",
-    version="2.1.0"
+    title="Portfolio Chatbot API (Lightweight)",
+    description="Fast, context-aware chatbot - optimized for Railway",
+    version="2.2.0"
 )
 
-# Enhanced CORS for Railway deployment
+# Enhanced CORS
 allowed_origins = [
     "http://localhost:3000",
     "http://localhost:5173",
@@ -60,14 +67,12 @@ allowed_origins = [
     "https://www.bilalriaz.com",
 ]
 
-# Add Railway-specific patterns
 if IS_RAILWAY:
     allowed_origins.extend([
         "https://*.railway.app",
         "https://*.up.railway.app",
     ])
 
-# Add Vercel and other hosting patterns
 allowed_origins.extend([
     "https://*.vercel.app",
     "https://*.netlify.app",
@@ -93,16 +98,14 @@ def get_session_history(session_id: str) -> BaseChatMessageHistory:
     return session_store[session_id]
 
 # ─────────────────────────────────────────────
-# Enhanced Embeddings with Better Model
+# LIGHTWEIGHT Embeddings using Cohere API
 # ─────────────────────────────────────────────
-print("📦 Loading embedding model...")
-print("   (First time may take 1-2 minutes to download)")
-embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-mpnet-base-v2",
-    model_kwargs={'device': 'cpu'},
-    encode_kwargs={'normalize_embeddings': True}
+print("📦 Initializing Cohere embeddings (API-based, no downloads)...")
+embeddings = CohereEmbeddings(
+    cohere_api_key=COHERE_API_KEY,
+    model="embed-english-light-v3.0",  # Lightweight, fast, free tier
 )
-print("✓ Embedding model loaded")
+print("✓ Cohere embeddings initialized (0 MB downloaded!)")
 
 # ─────────────────────────────────────────────
 # Document Loading with Metadata
@@ -153,7 +156,7 @@ def load_documents_with_metadata():
     except Exception as e:
         print(f"✗ Error loading FAQ: {e}")
     
-    # Load Website (skip on Railway to speed up deployment)
+    # Skip website scraping on Railway for faster deployment
     if not IS_RAILWAY:
         try:
             print("🌐 Loading website content...")
@@ -204,7 +207,6 @@ def create_text_splitters():
 print("\n🔨 Setting up vector store...")
 
 # On Railway, always rebuild (ephemeral storage)
-# Locally, use cached version if available
 should_rebuild = IS_RAILWAY or not (os.path.exists(VECTOR_DB_DIR) and os.listdir(VECTOR_DB_DIR))
 
 if should_rebuild:
@@ -296,10 +298,6 @@ prompt = ChatPromptTemplate.from_messages(
 # Fast LLM via Groq
 # ─────────────────────────────────────────────
 print("🤖 Initializing Groq LLM...")
-
-if not GROQ_API_KEY:
-    raise ValueError("❌ GROQ_API_KEY not found! Set it in Railway environment variables.")
-
 llm = ChatGroq(
     model="llama-3.3-70b-versatile",
     temperature=0.1,
@@ -387,11 +385,11 @@ class SessionResponse(BaseModel):
 class HealthResponse(BaseModel):
     status: str
     environment: str
+    embedding_provider: str
     model: str
     speed: str
     features: list[str]
     documents_loaded: int
-    vector_store_size: int
 
 # ─────────────────────────────────────────────
 # Streaming Generator
@@ -430,11 +428,11 @@ def health_check():
     return HealthResponse(
         status="healthy",
         environment="railway" if IS_RAILWAY else "local",
+        embedding_provider="Cohere API (embed-english-light-v3.0)",
         model="llama-3.3-70b-versatile (via Groq)",
         speed="Fast (2-5 seconds)",
-        features=["RAG", "Session Memory", "Streaming", "FAQ Support", "Optimized Retrieval"],
-        documents_loaded=doc_count,
-        vector_store_size=doc_count
+        features=["RAG", "Session Memory", "Streaming", "FAQ Support", "Lightweight (<1GB)"],
+        documents_loaded=doc_count
     )
 
 @app.post("/session/new", response_model=SessionResponse)
@@ -528,6 +526,7 @@ async def get_stats():
     
     return {
         "environment": "railway" if IS_RAILWAY else "local",
+        "embedding_provider": "Cohere API",
         "active_sessions": len(session_store),
         "total_chunks": doc_count,
         "retriever_config": {
@@ -553,11 +552,13 @@ async def startup_event():
     print("="*60)
     print(f"🌍 Environment: {'Railway' if IS_RAILWAY else 'Local'}")
     print(f"🔌 Port: {PORT}")
+    print(f"📦 Embeddings: Cohere API (lightweight)")
     print(f"📁 Vector Store: {VECTOR_DB_DIR}")
     print(f"📄 Resume: {RESUME_MD_PATH} {'✓' if os.path.exists(RESUME_MD_PATH) else '✗'}")
     print(f"❓ FAQ: {FAQ_PATH} {'✓' if os.path.exists(FAQ_PATH) else '✗'}")
     print(f"🤖 Model: llama-3.3-70b-versatile (Groq)")
     print(f"⚡ Speed: 2-5 seconds per response")
+    print(f"💾 Image Size: < 1 GB (Railway optimized)")
     print("="*60 + "\n")
 
 if __name__ == "__main__":
