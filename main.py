@@ -1,5 +1,5 @@
 # Author: Bilal Riaz
-# Description: Optimized FastAPI chatbot with improved context handling and FAQ support
+# Description: Railway-optimized FastAPI chatbot with improved deployment handling
 # Fast Cloud API using Groq - 2-5 second responses
 
 import os
@@ -25,7 +25,6 @@ from langchain_core.output_parsers import StrOutputParser
 from langchain_core.runnables import RunnablePassthrough, RunnableLambda
 from langchain_core.runnables.history import RunnableWithMessageHistory
 from langchain_core.chat_history import BaseChatMessageHistory
-from langchain_core.documents import Document
 
 load_dotenv()
 
@@ -37,25 +36,46 @@ RESUME_MD_PATH = os.getenv("RESUME_MD_PATH", "./resume.md")
 FAQ_PATH = os.getenv("FAQ_PATH", "./faq.md")
 GROQ_API_KEY = os.getenv("GROQ_API_KEY")
 
+# Railway deployment detection
+IS_RAILWAY = os.getenv("RAILWAY_ENVIRONMENT") is not None
+PORT = int(os.getenv("PORT", 8000))
+
+print(f"🚂 Running on Railway: {IS_RAILWAY}")
+print(f"🔌 Port: {PORT}")
+
 # ─────────────────────────────────────────────
 # FastAPI App
 # ─────────────────────────────────────────────
 app = FastAPI(
-    title="Portfolio Chatbot API (Optimized)",
+    title="Portfolio Chatbot API (Railway-Optimized)",
     description="Fast, context-aware chatbot with FAQ support",
-    version="2.0.0"
+    version="2.1.0"
 )
+
+# Enhanced CORS for Railway deployment
+allowed_origins = [
+    "http://localhost:3000",
+    "http://localhost:5173",
+    "https://bilalriaz.com",
+    "https://www.bilalriaz.com",
+]
+
+# Add Railway-specific patterns
+if IS_RAILWAY:
+    allowed_origins.extend([
+        "https://*.railway.app",
+        "https://*.up.railway.app",
+    ])
+
+# Add Vercel and other hosting patterns
+allowed_origins.extend([
+    "https://*.vercel.app",
+    "https://*.netlify.app",
+])
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=[
-        "http://localhost:3000",
-        "http://localhost:5173",
-        "https://bilalriaz.com",
-        "https://www.bilalriaz.com",
-        "https://*.railway.app",
-        "https://*.vercel.app"
-    ],
+    allow_origins=allowed_origins,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -75,9 +95,10 @@ def get_session_history(session_id: str) -> BaseChatMessageHistory:
 # ─────────────────────────────────────────────
 # Enhanced Embeddings with Better Model
 # ─────────────────────────────────────────────
-print("Loading embedding model...")
+print("📦 Loading embedding model...")
+print("   (First time may take 1-2 minutes to download)")
 embeddings = HuggingFaceEmbeddings(
-    model_name="sentence-transformers/all-mpnet-base-v2",  # Better than MiniLM
+    model_name="sentence-transformers/all-mpnet-base-v2",
     model_kwargs={'device': 'cpu'},
     encode_kwargs={'normalize_embeddings': True}
 )
@@ -93,11 +114,10 @@ def load_documents_with_metadata():
     # Load Resume
     try:
         if os.path.exists(RESUME_MD_PATH):
-            print(f"Loading resume from {RESUME_MD_PATH}...")
+            print(f"📄 Loading resume from {RESUME_MD_PATH}...")
             md_loader = TextLoader(RESUME_MD_PATH, encoding="utf-8")
             md_docs = md_loader.load()
             
-            # Add metadata
             for doc in md_docs:
                 doc.metadata.update({
                     "source_type": "resume",
@@ -112,14 +132,13 @@ def load_documents_with_metadata():
     except Exception as e:
         print(f"✗ Error loading resume: {e}")
     
-    # Load FAQ - OPTIMIZED FOR Q&A
+    # Load FAQ
     try:
         if os.path.exists(FAQ_PATH):
-            print(f"Loading FAQ from {FAQ_PATH}...")
+            print(f"❓ Loading FAQ from {FAQ_PATH}...")
             faq_loader = TextLoader(FAQ_PATH, encoding="utf-8")
             faq_docs = faq_loader.load()
             
-            # Add metadata for FAQ
             for doc in faq_docs:
                 doc.metadata.update({
                     "source_type": "faq",
@@ -134,25 +153,26 @@ def load_documents_with_metadata():
     except Exception as e:
         print(f"✗ Error loading FAQ: {e}")
     
-    # Load Website
-    try:
-        print("Loading website content (this may take a moment)...")
-        web_loader = WebBaseLoader("https://bilalriaz.com")
-        web_docs = web_loader.load()
-        
-        # Add metadata
-        for doc in web_docs:
-            doc.metadata.update({
-                "source_type": "website",
-                "priority": "medium",
-                "format": "html"
-            })
-        
-        all_documents.extend(web_docs)
-        print(f"✓ Loaded {len(web_docs)} website document(s)")
-    except Exception as e:
-        print(f"⚠ Warning: Could not load website content: {e}")
-        print("  Continuing with local documents only...")
+    # Load Website (skip on Railway to speed up deployment)
+    if not IS_RAILWAY:
+        try:
+            print("🌐 Loading website content...")
+            web_loader = WebBaseLoader("https://bilalriaz.com")
+            web_docs = web_loader.load()
+            
+            for doc in web_docs:
+                doc.metadata.update({
+                    "source_type": "website",
+                    "priority": "medium",
+                    "format": "html"
+                })
+            
+            all_documents.extend(web_docs)
+            print(f"✓ Loaded {len(web_docs)} website document(s)")
+        except Exception as e:
+            print(f"⚠ Skipping website content: {e}")
+    else:
+        print("🚂 Railway deployment: Skipping web scraping for faster startup")
     
     return all_documents
 
@@ -162,7 +182,6 @@ def load_documents_with_metadata():
 def create_text_splitters():
     """Create optimized text splitters for different document types"""
     
-    # Standard splitter for resume
     resume_splitter = RecursiveCharacterTextSplitter(
         chunk_size=800,
         chunk_overlap=200,
@@ -170,7 +189,6 @@ def create_text_splitters():
         length_function=len
     )
     
-    # Larger chunks for FAQ to keep Q&A pairs together
     faq_splitter = RecursiveCharacterTextSplitter(
         chunk_size=1200,
         chunk_overlap=300,
@@ -181,30 +199,26 @@ def create_text_splitters():
     return resume_splitter, faq_splitter
 
 # ─────────────────────────────────────────────
-# Vector Store Setup with Optimization
+# Vector Store Setup (Railway-optimized)
 # ─────────────────────────────────────────────
-if os.path.exists(VECTOR_DB_DIR) and os.listdir(VECTOR_DB_DIR):
-    print(f"Loading existing vector store from {VECTOR_DB_DIR}...")
-    vectorstore = Chroma(
-        persist_directory=VECTOR_DB_DIR,
-        embedding_function=embeddings,
-    )
-    print("✓ Vector store loaded")
-else:
-    print("Building new vector store...")
+print("\n🔨 Setting up vector store...")
+
+# On Railway, always rebuild (ephemeral storage)
+# Locally, use cached version if available
+should_rebuild = IS_RAILWAY or not (os.path.exists(VECTOR_DB_DIR) and os.listdir(VECTOR_DB_DIR))
+
+if should_rebuild:
+    print("🏗️  Building vector store (this may take 30-60 seconds)...")
     
-    # Load documents
     all_documents = load_documents_with_metadata()
     
     if not all_documents:
         raise ValueError("❌ No documents were loaded. Please check your file paths.")
     
-    print(f"Total documents loaded: {len(all_documents)}")
+    print(f"📚 Total documents loaded: {len(all_documents)}")
     
-    # Create splitters
     resume_splitter, faq_splitter = create_text_splitters()
     
-    # Split documents based on type
     all_chunks = []
     for doc in all_documents:
         if doc.metadata.get("source_type") == "faq":
@@ -213,26 +227,36 @@ else:
             chunks = resume_splitter.split_documents([doc])
         all_chunks.extend(chunks)
     
-    print(f"Total chunks created: {len(all_chunks)}")
+    print(f"✂️  Total chunks created: {len(all_chunks)}")
     
-    # Create vector store with chunks
     vectorstore = Chroma.from_documents(
         all_chunks,
         embedding=embeddings,
         persist_directory=VECTOR_DB_DIR,
     )
-    vectorstore.persist()
-    print(f"✓ Vector store created and persisted to {VECTOR_DB_DIR}")
+    
+    if not IS_RAILWAY:
+        vectorstore.persist()
+        print(f"💾 Vector store persisted to {VECTOR_DB_DIR}")
+    else:
+        print(f"✓ Vector store created (ephemeral - Railway)")
+else:
+    print(f"📂 Loading existing vector store from {VECTOR_DB_DIR}...")
+    vectorstore = Chroma(
+        persist_directory=VECTOR_DB_DIR,
+        embedding_function=embeddings,
+    )
+    print("✓ Vector store loaded from cache")
 
 # ─────────────────────────────────────────────
-# Optimized Retriever with Better Settings
+# Optimized Retriever
 # ─────────────────────────────────────────────
 retriever = vectorstore.as_retriever(
-    search_type="mmr",  # Maximum Marginal Relevance for diversity
+    search_type="mmr",
     search_kwargs={
-        "k": 6,              # Retrieve 6 chunks 
-        "fetch_k": 15,       # Consider 15 candidates 
-        "lambda_mult": 0.7   # Balance between relevance (1.0) and diversity (0.0)
+        "k": 6,
+        "fetch_k": 15,
+        "lambda_mult": 0.7
     }
 )
 
@@ -271,41 +295,41 @@ prompt = ChatPromptTemplate.from_messages(
 # ─────────────────────────────────────────────
 # Fast LLM via Groq
 # ─────────────────────────────────────────────
-print("Initializing Groq LLM...")
+print("🤖 Initializing Groq LLM...")
+
+if not GROQ_API_KEY:
+    raise ValueError("❌ GROQ_API_KEY not found! Set it in Railway environment variables.")
+
 llm = ChatGroq(
-    model="llama-3.3-70b-versatile",  # Fast and accurate
-    temperature=0.1,  # Low temperature for factual accuracy
-    max_tokens=1024,  # Reasonable response length
+    model="llama-3.3-70b-versatile",
+    temperature=0.1,
+    max_tokens=1024,
     streaming=True,
     api_key=GROQ_API_KEY,
 )
 print("✓ Groq LLM initialized")
 
 # ─────────────────────────────────────────────
-# Enhanced RAG Chain with Context Optimization
+# Enhanced RAG Chain
 # ─────────────────────────────────────────────
 def format_docs_with_metadata(docs):
-    """Format documents with source information for better context"""
+    """Format documents with source information"""
     formatted = []
     
-    # Group by source type
     resume_docs = [d for d in docs if d.metadata.get("source_type") == "resume"]
     faq_docs = [d for d in docs if d.metadata.get("source_type") == "faq"]
     website_docs = [d for d in docs if d.metadata.get("source_type") == "website"]
     
-    # Add resume content first (highest priority)
     if resume_docs:
         formatted.append("=== RESUME & PROFESSIONAL EXPERIENCE ===")
         for doc in resume_docs:
             formatted.append(doc.page_content)
     
-    # Add FAQ content (great for Q&A)
     if faq_docs:
         formatted.append("\n=== FREQUENTLY ASKED QUESTIONS ===")
         for doc in faq_docs:
             formatted.append(doc.page_content)
     
-    # Add website content last
     if website_docs:
         formatted.append("\n=== PORTFOLIO WEBSITE ===")
         for doc in website_docs:
@@ -314,21 +338,17 @@ def format_docs_with_metadata(docs):
     return "\n\n".join(formatted)
 
 def get_context_with_history(input_dict):
-    """Retrieve context considering chat history for better follow-ups"""
+    """Retrieve context considering chat history"""
     question = input_dict["question"]
     chat_history = input_dict.get("chat_history", [])
     
-    # If there's chat history, enhance the query with recent context
     if chat_history and len(chat_history) > 0:
         recent_context = []
-        # Get last 2 exchanges (4 messages: 2 user + 2 assistant)
         for msg in chat_history[-4:]:
             if hasattr(msg, 'content'):
                 recent_context.append(msg.content)
         
-        # Create enhanced query by combining recent context with question
         if recent_context:
-            # Take only the last user question and assistant response
             context_text = " ".join(recent_context[-2:])
             enhanced_query = f"Previous context: {context_text}\n\nCurrent question: {question}"
             docs = retriever.invoke(enhanced_query)
@@ -339,7 +359,6 @@ def get_context_with_history(input_dict):
     
     return format_docs_with_metadata(docs)
 
-# Build the RAG chain
 base_chain = (
     RunnablePassthrough.assign(context=RunnableLambda(get_context_with_history))
     | prompt
@@ -347,7 +366,6 @@ base_chain = (
     | StrOutputParser()
 )
 
-# Wrap with message history
 rag_chain_with_history = RunnableWithMessageHistory(
     base_chain,
     get_session_history,
@@ -368,6 +386,7 @@ class SessionResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    environment: str
     model: str
     speed: str
     features: list[str]
@@ -389,7 +408,6 @@ def stream_answer(question: str, session_id: str) -> Generator[str, None, None]:
         for chunk in rag_chain_with_history.stream(input_dict, config=config):
             yield chunk
         
-        # Log session info
         history = session_store[session_id]
         print(f"✓ Stream completed for session {session_id[:8]}... ({len(history.messages)} messages)")
     except Exception as e:
@@ -402,8 +420,7 @@ def stream_answer(question: str, session_id: str) -> Generator[str, None, None]:
 # ─────────────────────────────────────────────
 @app.get("/", response_model=HealthResponse)
 def health_check():
-    """Health check endpoint with system information"""
-    # Count documents in vector store
+    """Health check endpoint"""
     try:
         collection = vectorstore._collection
         doc_count = collection.count()
@@ -411,7 +428,8 @@ def health_check():
         doc_count = 0
     
     return HealthResponse(
-        status="Portfolio Chatbot API running",
+        status="healthy",
+        environment="railway" if IS_RAILWAY else "local",
         model="llama-3.3-70b-versatile (via Groq)",
         speed="Fast (2-5 seconds)",
         features=["RAG", "Session Memory", "Streaming", "FAQ Support", "Optimized Retrieval"],
@@ -439,7 +457,7 @@ async def ask(req: QuestionRequest):
     input_dict = {"question": req.question}
     
     try:
-        print(f"Processing question: '{req.question[:50]}...' for session {session_id[:8]}...")
+        print(f"💬 Processing: '{req.question[:50]}...' for session {session_id[:8]}...")
         answer = rag_chain_with_history.invoke(input_dict, config=config)
         
         history = session_store[session_id]
@@ -459,7 +477,7 @@ async def ask_stream(req: QuestionRequest):
     """Stream answer with full conversation history"""
     session_id = req.session_id or str(uuid4())
     
-    print(f"Starting stream for session {session_id[:8]}...")
+    print(f"🌊 Starting stream for session {session_id[:8]}...")
     
     return StreamingResponse(
         stream_answer(req.question, session_id),
@@ -509,6 +527,7 @@ async def get_stats():
         doc_count = 0
     
     return {
+        "environment": "railway" if IS_RAILWAY else "local",
         "active_sessions": len(session_store),
         "total_chunks": doc_count,
         "retriever_config": {
@@ -523,61 +542,6 @@ async def get_stats():
         }
     }
 
-@app.post("/rebuild-vectorstore")
-async def rebuild_vectorstore():
-    """Rebuild the vector store with updated documents"""
-    import shutil
-    
-    print("Rebuilding vector store...")
-    
-    # Remove existing vector store
-    if os.path.exists(VECTOR_DB_DIR):
-        shutil.rmtree(VECTOR_DB_DIR)
-        print("✓ Old vector store removed")
-    
-    # Reload documents
-    all_documents = load_documents_with_metadata()
-    
-    if not all_documents:
-        return {"status": "error", "message": "No documents loaded"}
-    
-    # Create splitters
-    resume_splitter, faq_splitter = create_text_splitters()
-    
-    # Split documents based on type
-    all_chunks = []
-    for doc in all_documents:
-        if doc.metadata.get("source_type") == "faq":
-            chunks = faq_splitter.split_documents([doc])
-        else:
-            chunks = resume_splitter.split_documents([doc])
-        all_chunks.extend(chunks)
-    
-    print(f"Created {len(all_chunks)} chunks")
-    
-    # Rebuild vector store
-    global vectorstore, retriever
-    vectorstore = Chroma.from_documents(
-        all_chunks,
-        embedding=embeddings,
-        persist_directory=VECTOR_DB_DIR,
-    )
-    vectorstore.persist()
-    
-    # Update retriever
-    retriever = vectorstore.as_retriever(
-        search_type="mmr",
-        search_kwargs={"k": 6, "fetch_k": 15, "lambda_mult": 0.7}
-    )
-    
-    print("✓ Vector store rebuilt successfully")
-    
-    return {
-        "status": "Vector store rebuilt successfully",
-        "total_chunks": len(all_chunks),
-        "documents_loaded": len(all_documents)
-    }
-
 # ─────────────────────────────────────────────
 # Startup Event
 # ─────────────────────────────────────────────
@@ -587,13 +551,15 @@ async def startup_event():
     print("\n" + "="*60)
     print("🚀 Portfolio Chatbot API Started Successfully!")
     print("="*60)
+    print(f"🌍 Environment: {'Railway' if IS_RAILWAY else 'Local'}")
+    print(f"🔌 Port: {PORT}")
     print(f"📁 Vector Store: {VECTOR_DB_DIR}")
-    print(f"📄 Resume: {RESUME_MD_PATH}")
-    print(f"❓ FAQ: {FAQ_PATH}")
+    print(f"📄 Resume: {RESUME_MD_PATH} {'✓' if os.path.exists(RESUME_MD_PATH) else '✗'}")
+    print(f"❓ FAQ: {FAQ_PATH} {'✓' if os.path.exists(FAQ_PATH) else '✗'}")
     print(f"🤖 Model: llama-3.3-70b-versatile (Groq)")
     print(f"⚡ Speed: 2-5 seconds per response")
     print("="*60 + "\n")
 
 if __name__ == "__main__":
     import uvicorn
-    uvicorn.run(app, host="0.0.0.0", port=8000)
+    uvicorn.run(app, host="0.0.0.0", port=PORT)
