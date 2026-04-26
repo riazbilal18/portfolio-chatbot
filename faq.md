@@ -118,7 +118,6 @@ This information would need to be confirmed directly with Bilal. You can reach h
 ### How can I contact Bilal?
 - **Email:** riazbilal18@gmail.com
 - **LinkedIn:** https://www.linkedin.com/in/bilal-a-riaz/
-- **Phone:** 610-533-9228
 - **Website:** https://bilalriaz.com
 
 ### Where is Bilal located?
